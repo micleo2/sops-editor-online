@@ -4,11 +4,12 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // Node is the JSON representation of a tree value used by the web UI.
 //
-// T is one of "map", "seq", "str", "int", "float", "bool" or "null". Scalar
+// T is one of "map", "seq", "str", "int", "float", "bool", "time" or "null". Scalar
 // values are always carried as strings in V so that no precision is lost.
 // Enc reports whether SOPS encrypts the value (only set on scalars).
 type Node struct {
@@ -21,10 +22,12 @@ type Node struct {
 // Item is an entry of a map or sequence: a comment line, a key/value pair
 // (maps) or a value (sequences).
 type Item struct {
-	C   *string `json:"c,omitempty"`
-	K   *string `json:"k,omitempty"`
-	V   *Node   `json:"v,omitempty"`
-	Enc *bool   `json:"enc,omitempty"`
+	C *string `json:"c,omitempty"`
+	// Inline marks a comment that trails a value on the same line.
+	Inline bool    `json:"inline,omitempty"`
+	K      *string `json:"k,omitempty"`
+	V      *Node   `json:"v,omitempty"`
+	Enc    *bool   `json:"enc,omitempty"`
 }
 
 // ToJSONModel converts tree branches to the UI model, annotating every leaf
@@ -138,7 +141,7 @@ func (c *converter) branch(in TreeBranch) (*Node, error) {
 	for _, item := range in {
 		if comment, ok := item.Key.(Comment); ok {
 			text := comment.Value
-			n.Items = append(n.Items, Item{C: &text, Enc: c.flag()})
+			n.Items = append(n.Items, Item{C: &text, Inline: comment.Inline, Enc: c.flag()})
 			continue
 		}
 		key, ok := item.Key.(string)
@@ -166,6 +169,12 @@ func (c *converter) value(in interface{}) (*Node, error) {
 		return &Node{T: "float", V: strconv.FormatFloat(v, 'f', -1, 64), Enc: c.flag()}, nil
 	case bool:
 		return &Node{T: "bool", V: strconv.FormatBool(v), Enc: c.flag()}, nil
+	case time.Time:
+		text, err := v.MarshalText()
+		if err != nil {
+			return nil, err
+		}
+		return &Node{T: "time", V: string(text), Enc: c.flag()}, nil
 	case nil:
 		// nil values are not walked by SOPS, so they consume no flag.
 		return &Node{T: "null"}, nil
@@ -176,7 +185,7 @@ func (c *converter) value(in interface{}) (*Node, error) {
 		for _, x := range v {
 			if comment, ok := x.(Comment); ok {
 				text := comment.Value
-				n.Items = append(n.Items, Item{C: &text, Enc: c.flag()})
+				n.Items = append(n.Items, Item{C: &text, Inline: comment.Inline, Enc: c.flag()})
 				continue
 			}
 			child, err := c.value(x)
@@ -199,7 +208,7 @@ func fromNode(n *Node, path []string, lenient bool) (interface{}, error) {
 	switch n.T {
 	case "str":
 		return n.V, nil
-	case "int", "float", "bool":
+	case "int", "float", "bool", "time":
 		v, err := parseScalar(n, where)
 		if err != nil && lenient {
 			return n.V, nil
@@ -230,6 +239,12 @@ func parseScalar(n *Node, where string) (interface{}, error) {
 			return nil, fmt.Errorf("%s: %q is not true or false", where, n.V)
 		}
 		return b, nil
+	case "time":
+		var t time.Time
+		if err := t.UnmarshalText([]byte(strings.TrimSpace(n.V))); err != nil {
+			return nil, fmt.Errorf("%s: %q is not an RFC 3339 timestamp (like 2024-05-01T10:00:00Z)", where, n.V)
+		}
+		return t, nil
 	}
 	return nil, fmt.Errorf("%s: unknown type %q", where, n.T)
 }
@@ -243,7 +258,7 @@ func fromNodeCollections(n *Node, path []string, lenient bool, where string) (in
 		seen := map[string]bool{}
 		for _, item := range n.Items {
 			if item.C != nil {
-				branch = append(branch, TreeItem{Key: Comment{Value: *item.C}, Value: nil})
+				branch = append(branch, TreeItem{Key: Comment{Value: *item.C, Inline: item.Inline}, Value: nil})
 				continue
 			}
 			if item.K == nil || item.V == nil {
@@ -268,7 +283,7 @@ func fromNodeCollections(n *Node, path []string, lenient bool, where string) (in
 		list := make([]interface{}, 0, len(n.Items))
 		for i, item := range n.Items {
 			if item.C != nil {
-				list = append(list, Comment{Value: *item.C})
+				list = append(list, Comment{Value: *item.C, Inline: item.Inline})
 				continue
 			}
 			if item.V == nil {

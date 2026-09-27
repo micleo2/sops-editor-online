@@ -203,7 +203,7 @@ footer p { margin: 4px 0; }
 <div class="wrap">
   <header>
     <h1><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>SOPS Editor</h1>
-    <p class="sub">Edit age-encrypted SOPS YAML files. Everything runs inside this page, and nothing is sent anywhere.</p>
+    <p class="sub">Edit age-encrypted SOPS YAML and .env files. Everything runs inside this page, and nothing is sent anywhere.</p>
   </header>
 
   <section class="card" id="open-card">
@@ -220,7 +220,7 @@ footer p { margin: 4px 0; }
       </div>
       <details id="paste-details">
         <summary>Or paste the file contents</summary>
-        <textarea id="pasted" rows="6" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="key: ENC[AES256_GCM,…]&#10;sops:&#10;    age: …"></textarea>
+        <textarea id="pasted" rows="6" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="key: ENC[AES256_GCM,…]&#10;or&#10;KEY=ENC[AES256_GCM,…]"></textarea>
       </details>
     </div>
     <div class="field">
@@ -280,7 +280,7 @@ footer p { margin: 4px 0; }
   </section>
 
   <footer>
-    <p>The SOPS format code (tree walking, AES-GCM values, MAC, YAML store) is compiled from the SOPS Go sources and <code>filippo.io/age</code> to WebAssembly, and is embedded in this file.</p>
+    <p>The SOPS format code (tree walking, AES-GCM values, MAC, YAML and dotenv stores) is compiled from the SOPS Go sources and <code>filippo.io/age</code> to WebAssembly, and is embedded in this file.</p>
     <p>This page's security policy blocks all network access.</p>
   </footer>
 </div>
@@ -301,12 +301,13 @@ const ICONS = {
 };
 const TYPES = [
   ["str", "text"], ["int", "integer"], ["float", "number"], ["bool", "true/false"],
-  ["null", "null"], ["map", "group"], ["seq", "list"],
+  ["time", "timestamp"], ["null", "null"], ["map", "group"], ["seq", "list"],
 ];
 
 const $ = (id) => document.getElementById(id);
 const state = {
   docs: null,        // editor model: array of map nodes (one per YAML document)
+  format: "yaml",    // "yaml" or "dotenv"
   fileName: "",
   fileText: "",
   output: "",
@@ -411,12 +412,16 @@ $("decrypt").addEventListener("click", () => {
   if (!$("keys").value.trim()) { $("open-error").textContent = "Paste your age key first."; return; }
   let res;
   try {
-    res = call("open", text, $("keys").value, $("ignore-mac").checked);
+    res = call("open", text, $("keys").value, $("ignore-mac").checked, state.fileName);
   } catch (e) {
     $("open-error").textContent = e.message;
     return;
   }
   state.docs = res.docs;
+  state.format = res.format;
+  yamlChanged.cancel();
+  state.yamlDirty = false;
+  $("tab-yaml").textContent = state.format === "dotenv" ? ".env" : "YAML";
   showMeta(res.recipients);
   $("edit-card").hidden = false;
   $("out-card").hidden = false;
@@ -448,6 +453,7 @@ function convert(node, t) {
   if (hasChildren && !confirm("Changing the type will remove the nested entries. Continue?")) return null;
   if (t === "map" || t === "seq") return { t, v: "", items: [] };
   if (t === "null") return { t, v: "" };
+  if (t === "time" && !(scalar && node.v.trim())) return { t, v: new Date().toISOString().replace(/\.\d+Z$/, "Z") };
   if (t === "bool") return { t, v: /^(true|yes|1|on)$/i.test(scalar ? node.v.trim() : "") ? "true" : "false" };
   return { t, v: scalar && node.t !== "null" ? node.v : "" };
 }
@@ -502,6 +508,14 @@ function valueEditor(node) {
       ta.addEventListener("input", () => { node.v = ta.value; autosize(ta); changed(); });
       requestAnimationFrame(() => autosize(ta));
       return ta;
+    }
+    case "time": {
+      const inp = el("input", { type: "text", class: "value", autocomplete: "off", spellcheck: "false", "aria-label": "Timestamp (RFC 3339)", placeholder: "2024-05-01T10:00:00Z" });
+      inp.value = node.v;
+      const check = () => inp.classList.toggle("invalid", Number.isNaN(Date.parse(inp.value.trim())));
+      inp.addEventListener("input", () => { node.v = inp.value; check(); changed(); });
+      check();
+      return inp;
     }
     case "int":
     case "float": {
@@ -587,7 +601,8 @@ function renderItem(parent, item, index) {
   } else {
     head.append(el("span", { class: "index" }, `item ${parent.items.filter((o) => !("c" in o)).indexOf(item) + 1}`));
   }
-  head.append(typeSelect(node, (next) => { item.v = next; structureChanged(); }));
+  // Every value in a dotenv file is a string, so there is nothing to choose.
+  if (state.format !== "dotenv") head.append(typeSelect(node, (next) => { item.v = next; structureChanged(); }));
   const badge = lockBadge(node);
   if (badge) head.append(badge);
   head.append(deleteButton(parent.t === "map" ? "Delete field" : "Delete item", remove));
@@ -659,7 +674,7 @@ function setTab(tab) {
   $("edit-error").textContent = "";
   if (tab === "yaml") {
     try {
-      $("yaml").value = call("toYAML", JSON.stringify(state.docs)).yaml;
+      $("yaml").value = call("toText", JSON.stringify(state.docs)).text;
     } catch (e) {
       $("edit-error").textContent = e.message;
       return;
@@ -668,9 +683,9 @@ function setTab(tab) {
   } else if (state.tab === "yaml" && state.yamlDirty) {
     yamlChanged.cancel();
     try {
-      state.docs = call("fromYAML", $("yaml").value).docs;
+      state.docs = call("fromText", $("yaml").value).docs;
     } catch (e) {
-      $("edit-error").textContent = "Fix the YAML before switching back: " + e.message;
+      $("edit-error").textContent = `Fix the ${state.format === "dotenv" ? ".env text" : "YAML"} before switching back: ` + e.message;
       return;
     }
     renderFields();
@@ -687,13 +702,13 @@ $("tab-yaml").addEventListener("click", () => setTab("yaml"));
 
 const yamlChanged = debounce(() => {
   try {
-    state.docs = call("fromYAML", $("yaml").value).docs;
+    state.docs = call("fromText", $("yaml").value).docs;
     $("edit-error").textContent = "";
     regenerate();
   } catch (e) {
     $("edit-error").textContent = e.message;
     regenerate.cancel();
-    setOutput(null, "Fix the YAML above to update the output.");
+    setOutput(null, `Fix the ${state.format === "dotenv" ? ".env text" : "YAML"} above to update the output.`);
   }
 }, 300);
 $("yaml").addEventListener("input", () => { state.yamlDirty = true; yamlChanged(); });
@@ -742,9 +757,9 @@ function ensureFresh() {
 $("download").addEventListener("click", () => {
   const text = ensureFresh();
   if (!text) return;
-  const blob = new Blob([text], { type: "application/x-yaml" });
+  const blob = new Blob([text], { type: state.format === "dotenv" ? "text/plain" : "application/x-yaml" });
   const url = URL.createObjectURL(blob);
-  const a = el("a", { href: url, download: state.fileName || "secrets.enc.yaml" });
+  const a = el("a", { href: url, download: state.fileName || (state.format === "dotenv" ? "secrets.enc.env" : "secrets.enc.yaml") });
   document.body.append(a);
   a.click();
   a.remove();

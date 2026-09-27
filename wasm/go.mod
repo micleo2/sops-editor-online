@@ -7,7 +7,7 @@ toolchain go1.24.7
 require (
 	filippo.io/age v1.2.1
 	github.com/getsops/sops/v3 v3.9.4
-	gopkg.in/yaml.v3 v3.0.1
+	go.yaml.in/yaml/v3 v3.0.4
 )
 
 require (

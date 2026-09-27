@@ -45,9 +45,11 @@ func settings() sopscore.Metadata {
 	return session.Settings
 }
 
-// open(encryptedYAML, ageKeys, ignoreMAC)
+// open(encryptedFile, ageKeys, ignoreMAC, fileName)
 func open(args []js.Value) string {
-	s, err := sopscore.Open([]byte(args[0].String()), args[1].String(), args[2].Truthy())
+	content := []byte(args[0].String())
+	format := sopscore.DetectFormat(args[3].String(), content)
+	s, err := sopscore.Open(content, args[1].String(), args[2].Truthy(), format)
 	if err != nil {
 		return failure(err)
 	}
@@ -56,7 +58,7 @@ func open(args []js.Value) string {
 		return failure(err)
 	}
 	session = s
-	return result(map[string]interface{}{"docs": docs, "recipients": s.Recipients})
+	return result(map[string]interface{}{"docs": docs, "recipients": s.Recipients, "format": s.Format})
 }
 
 // encrypt(docsJSON) -> encrypted file
@@ -72,22 +74,22 @@ func encrypt(args []js.Value) string {
 	return result(map[string]interface{}{"output": string(out)})
 }
 
-// toYAML(docsJSON) -> plaintext YAML
-func toYAML(args []js.Value) string {
+// toText(docsJSON) -> plaintext file in the session's format
+func toText(args []js.Value) string {
 	branches, err := parseDocs(args[0].String())
 	if err != nil {
 		return failure(err)
 	}
-	out, err := sopscore.EmitPlain(branches)
+	out, err := sopscore.EmitPlain(session.Format, branches)
 	if err != nil {
 		return failure(err)
 	}
-	return result(map[string]interface{}{"yaml": string(out)})
+	return result(map[string]interface{}{"text": string(out)})
 }
 
-// fromYAML(plaintextYAML) -> docs
-func fromYAML(args []js.Value) string {
-	branches, err := sopscore.LoadPlain([]byte(args[0].String()))
+// fromText(plaintext) -> docs
+func fromText(args []js.Value) string {
+	branches, err := sopscore.LoadPlain(session.Format, []byte(args[0].String()))
 	if err != nil {
 		return failure(err)
 	}
@@ -136,8 +138,8 @@ func main() {
 	js.Global().Set("sopsCore", js.Global().Get("Object").New())
 	export("open", open, false)
 	export("encrypt", encrypt, true)
-	export("toYAML", toYAML, false)
-	export("fromYAML", fromYAML, false)
+	export("toText", toText, true)
+	export("fromText", fromText, true)
 	export("annotate", annotate, false)
 	export("close", closeSession, false)
 	if ready := js.Global().Get("onSopsCoreReady"); ready.Type() == js.TypeFunction {

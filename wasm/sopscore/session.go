@@ -5,20 +5,47 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
 	"filippo.io/age"
 	"filippo.io/age/armor"
 	"github.com/getsops/sops/v3/shamir"
-	"gopkg.in/yaml.v3"
 )
 
 // MetadataKey is the top-level key SOPS stores its metadata under.
 const MetadataKey = "sops"
 
-// yamlIndent matches the default indentation of the SOPS YAML store.
-const yamlIndent = 4
+// Format is the file format of a SOPS document.
+type Format string
+
+const (
+	FormatYAML   Format = "yaml"
+	FormatDotenv Format = "dotenv"
+)
+
+// sopsPrefix prefixes the flattened metadata keys in dotenv files.
+const sopsPrefix = MetadataKey + "_"
+
+var dotenvMetadataLine = regexp.MustCompile(`(?m)^sops_[a-z_]+=`)
+
+// DetectFormat picks the format from the file name like the sops CLI does,
+// falling back to looking for flattened dotenv metadata keys.
+func DetectFormat(fileName string, content []byte) Format {
+	name := strings.ToLower(fileName)
+	switch {
+	case strings.HasSuffix(name, ".env"):
+		return FormatDotenv
+	case strings.HasSuffix(name, ".yaml"), strings.HasSuffix(name, ".yml"):
+		return FormatYAML
+	}
+	if dotenvMetadataLine.Match(content) {
+		return FormatDotenv
+	}
+	return FormatYAML
+}
 
 // Recipient describes one age recipient listed in the file's metadata.
 type Recipient struct {
@@ -31,61 +58,31 @@ type Recipient struct {
 // Session is a decrypted SOPS document together with everything needed to
 // encrypt an edited version of it again (the same way `sops edit` does).
 type Session struct {
+	Format     Format
 	Branches   TreeBranches
 	Settings   Metadata
 	Recipients []Recipient
 
-	dataKey  []byte
-	cipher   Cipher
-	metadata TreeBranch
+	dataKey []byte
+	cipher  Cipher
+	// metadata is the unflattened metadata tree; rawMetadata holds it as it
+	// is stored in the file (the nested `sops` mapping for YAML, the
+	// flattened `sops_*` entries for dotenv) and is written back on save.
+	metadata    TreeBranch
+	rawMetadata TreeBranch
 }
 
-// Open parses an encrypted SOPS YAML file, recovers the data key using the
-// given age identities (the contents of an age keys.txt file) and decrypts
-// the document. Unless ignoreMAC is set, the MAC is verified like SOPS does.
-func Open(encrypted []byte, identities string, ignoreMAC bool) (*Session, error) {
-	store := Store{}
-	var branches TreeBranches
-	d := yaml.NewDecoder(bytes.NewReader(encrypted))
-	for {
-		var data yaml.Node
-		err := d.Decode(&data)
-		if err == io.EOF {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("Error unmarshaling input YAML: %s", err)
-		}
-		branch, err := store.yamlDocumentNodeToTreeBranch(data)
-		if err != nil {
-			return nil, fmt.Errorf("Error unmarshaling input YAML: %s", err)
-		}
-		branches = append(branches, branch)
+// Open parses an encrypted SOPS file, recovers the data key using the given
+// age identities (the contents of an age keys.txt file) and decrypts the
+// document. Unless ignoreMAC is set, the MAC is verified like SOPS does.
+func Open(encrypted []byte, identities string, ignoreMAC bool, format Format) (*Session, error) {
+	branches, err := LoadPlain(format, encrypted)
+	if err != nil {
+		return nil, err
 	}
-	if len(branches) == 0 {
-		return nil, errors.New("The file is empty.")
-	}
-
-	// Like SOPS, read the metadata from the first document and strip the
-	// metadata key from every document.
-	var metadata TreeBranch
-	for i, branch := range branches {
-		kept := make(TreeBranch, 0, len(branch))
-		for _, item := range branch {
-			if item.Key == MetadataKey {
-				if i == 0 {
-					if m, ok := item.Value.(TreeBranch); ok {
-						metadata = m
-					}
-				}
-				continue
-			}
-			kept = append(kept, item)
-		}
-		branches[i] = kept
-	}
-	if metadata == nil {
-		return nil, errors.New("No SOPS metadata found. Is this a SOPS-encrypted YAML file?")
+	branches, raw, metadata, err := extractMetadata(format, branches)
+	if err != nil {
+		return nil, err
 	}
 
 	settings, err := settingsFromMetadata(metadata)
@@ -127,26 +124,82 @@ func Open(encrypted []byte, identities string, ignoreMAC bool) (*Session, error)
 	}
 
 	return &Session{
-		Branches:   tree.Branches,
-		Settings:   settings,
-		Recipients: recipients,
-		dataKey:    dataKey,
-		cipher:     cipher,
-		metadata:   metadata,
+		Format:      format,
+		Branches:    tree.Branches,
+		Settings:    settings,
+		Recipients:  recipients,
+		dataKey:     dataKey,
+		cipher:      cipher,
+		metadata:    metadata,
+		rawMetadata: raw,
 	}, nil
 }
 
-// Encrypt encrypts the given plaintext branches with the session's data key
-// and returns the resulting SOPS YAML file. The recipients and other metadata
-// are kept; lastmodified and the MAC are updated. The branches are modified
-// in place.
-func (s *Session) Encrypt(branches TreeBranches, now time.Time) ([]byte, error) {
-	for _, branch := range branches {
+// extractMetadata mirrors stores.ExtractMetadata: it removes the metadata
+// from the branches and returns it both as stored and unflattened.
+func extractMetadata(format Format, branches TreeBranches) (TreeBranches, TreeBranch, TreeBranch, error) {
+	notFound := errors.New("No SOPS metadata found. Is this a SOPS-encrypted file?")
+	if len(branches) == 0 {
+		return nil, nil, nil, notFound
+	}
+	if format == FormatDotenv {
+		var raw, flat TreeBranch
+		kept := TreeBranch{}
+		for _, item := range branches[0] {
+			if key, ok := item.Key.(string); ok && strings.HasPrefix(key, sopsPrefix) {
+				raw = append(raw, item)
+				flat = append(flat, TreeItem{Key: key[len(sopsPrefix):], Value: item.Value})
+				continue
+			}
+			kept = append(kept, item)
+		}
+		if flat == nil {
+			return nil, nil, nil, notFound
+		}
+		metadata, err := unflattenTreeBranch(flat)
+		if err != nil {
+			return nil, nil, nil, err
+		}
+		branches[0] = kept
+		return branches, raw, metadata, nil
+	}
+
+	var metadata TreeBranch
+	found := false
+	for bi, branch := range branches {
+		kept := make(TreeBranch, 0, len(branch))
 		for _, item := range branch {
-			if item.Key == MetadataKey {
-				return nil, errors.New("The top-level key \"sops\" is reserved for SOPS metadata.")
+			if item.Key != MetadataKey {
+				kept = append(kept, item)
+				continue
+			}
+			if bi == 0 {
+				if found {
+					return nil, nil, nil, fmt.Errorf("Found duplicate %v entry", MetadataKey)
+				}
+				found = true
+				tree, ok := item.Value.(TreeBranch)
+				if !ok {
+					return nil, nil, nil, fmt.Errorf("Found %v entry that is not a mapping", MetadataKey)
+				}
+				metadata = tree
 			}
 		}
+		branches[bi] = kept
+	}
+	if metadata == nil {
+		return nil, nil, nil, notFound
+	}
+	return branches, metadata, metadata, nil
+}
+
+// Encrypt encrypts the given plaintext branches with the session's data key
+// and returns the resulting SOPS file. The recipients and other metadata are
+// kept; lastmodified and the MAC are updated. The branches are modified in
+// place.
+func (s *Session) Encrypt(branches TreeBranches, now time.Time) ([]byte, error) {
+	if err := checkReservedKeys(s.Format, branches); err != nil {
+		return nil, err
 	}
 	tree := Tree{Metadata: s.Settings, Branches: branches}
 	mac, err := tree.Encrypt(s.dataKey, s.cipher)
@@ -158,50 +211,52 @@ func (s *Session) Encrypt(branches TreeBranches, now time.Time) ([]byte, error) 
 	if err != nil {
 		return nil, fmt.Errorf("Could not encrypt MAC: %s", err)
 	}
-	metadata := make(TreeBranch, len(s.metadata))
-	copy(metadata, s.metadata)
+
+	metadata := make(TreeBranch, len(s.rawMetadata))
+	copy(metadata, s.rawMetadata)
+	if s.Format == FormatDotenv {
+		metadata = setField(metadata, sopsPrefix+"lastmodified", lastModified)
+		metadata = setField(metadata, sopsPrefix+"mac", encryptedMac)
+		out := TreeBranches{append(append(TreeBranch(nil), tree.Branches[0]...), metadata...)}
+		return EmitPlain(s.Format, out)
+	}
 	metadata = setField(metadata, "lastmodified", lastModified)
 	metadata = setField(metadata, "mac", encryptedMac)
-
-	store := Store{}
-	var b bytes.Buffer
-	e := yaml.NewEncoder(&b)
-	e.SetIndent(yamlIndent)
-	for _, branch := range tree.Branches {
-		var doc = yaml.Node{Kind: yaml.DocumentNode}
-		var mapping = yaml.Node{Kind: yaml.MappingNode}
-		doc.Content = append(doc.Content, &mapping)
-		branch = append(TreeBranch(nil), branch...)
-		branch = append(branch, TreeItem{Key: MetadataKey, Value: metadata})
-		store.appendTreeBranch(branch, &mapping)
-		if err := e.Encode(&doc); err != nil {
-			return nil, fmt.Errorf("Error marshaling to yaml: %s", err)
-		}
+	out := make(TreeBranches, len(tree.Branches))
+	for i, branch := range tree.Branches {
+		out[i] = append(append(TreeBranch(nil), branch...), TreeItem{Key: MetadataKey, Value: metadata})
 	}
-	e.Close()
-	return b.Bytes(), nil
+	return EmitPlain(s.Format, out)
 }
 
-// LoadPlain parses plaintext YAML into tree branches, like `sops edit` does
-// with the edited file.
-func LoadPlain(in []byte) (TreeBranches, error) {
-	store := Store{}
-	var branches TreeBranches
-	d := yaml.NewDecoder(bytes.NewReader(in))
-	for {
-		var data yaml.Node
-		err := d.Decode(&data)
-		if err == io.EOF {
-			break
+func checkReservedKeys(format Format, branches TreeBranches) error {
+	for _, branch := range branches {
+		for _, item := range branch {
+			key, ok := item.Key.(string)
+			if !ok {
+				continue
+			}
+			if format == FormatDotenv {
+				if strings.HasPrefix(key, sopsPrefix) {
+					return fmt.Errorf("Keys starting with %q are reserved for SOPS metadata: %s", sopsPrefix, key)
+				}
+			} else if key == MetadataKey {
+				return errors.New("The top-level key \"sops\" is reserved for SOPS metadata.")
+			}
 		}
-		if err != nil {
-			return nil, fmt.Errorf("Error unmarshaling input YAML: %s", err)
-		}
-		branch, err := store.yamlDocumentNodeToTreeBranch(data)
-		if err != nil {
-			return nil, fmt.Errorf("Error unmarshaling input YAML: %s", err)
-		}
-		branches = append(branches, branch)
+	}
+	return nil
+}
+
+// LoadPlain parses a plaintext file into tree branches, like `sops edit`
+// does with the edited file.
+func LoadPlain(format Format, in []byte) (TreeBranches, error) {
+	if format == FormatDotenv {
+		return (&DotenvStore{}).LoadPlainFile(in)
+	}
+	branches, err := (&YAMLStore{}).LoadPlainFile(in)
+	if err != nil {
+		return nil, err
 	}
 	if len(branches) == 0 {
 		branches = TreeBranches{TreeBranch{}}
@@ -209,23 +264,26 @@ func LoadPlain(in []byte) (TreeBranches, error) {
 	return branches, nil
 }
 
-// EmitPlain renders tree branches as plaintext YAML, like `sops decrypt`.
-func EmitPlain(branches TreeBranches) ([]byte, error) {
-	store := Store{}
-	var b bytes.Buffer
-	e := yaml.NewEncoder(&b)
-	e.SetIndent(yamlIndent)
-	for _, branch := range branches {
-		var doc = yaml.Node{Kind: yaml.DocumentNode}
-		var mapping = yaml.Node{Kind: yaml.MappingNode}
-		store.appendTreeBranch(branch, &mapping)
-		doc.Content = append(doc.Content, &mapping)
-		if err := e.Encode(&doc); err != nil {
-			return nil, fmt.Errorf("Error marshaling to yaml: %s", err)
+// EmitPlain renders tree branches as a plaintext file, like `sops decrypt`.
+func EmitPlain(format Format, branches TreeBranches) ([]byte, error) {
+	if format == FormatDotenv {
+		if len(branches) != 1 {
+			return nil, errors.New("A dotenv file has exactly one document.")
 		}
+		// The dotenv store writes keys verbatim; refuse keys it could not
+		// read back.
+		for _, item := range branches[0] {
+			if key, ok := item.Key.(string); ok {
+				if key == "" || strings.ContainsAny(key, "=\n") || strings.HasPrefix(key, "#") {
+					return nil, fmt.Errorf("%q is not a valid dotenv key", key)
+				}
+			} else if c, ok := item.Key.(Comment); ok && strings.Contains(c.Value, "\n") {
+				return nil, errors.New("Comments in dotenv files must be a single line.")
+			}
+		}
+		return (&DotenvStore{}).EmitPlainFile(branches)
 	}
-	e.Close()
-	return b.Bytes(), nil
+	return (&YAMLStore{}).EmitPlainFile(branches)
 }
 
 func field(metadata TreeBranch, key string) (interface{}, bool) {
@@ -283,8 +341,12 @@ func settingsFromMetadata(metadata TreeBranch) (Metadata, error) {
 		EncryptedCommentRegex:   stringField(metadata, "encrypted_comment_regex"),
 	}
 	if v, ok := field(metadata, "mac_only_encrypted"); ok {
-		b, _ := v.(bool)
-		m.MACOnlyEncrypted = b
+		switch v := v.(type) {
+		case bool:
+			m.MACOnlyEncrypted = v
+		case string:
+			m.MACOnlyEncrypted, _ = strconv.ParseBool(v)
+		}
 	}
 	cryptRuleCount := 0
 	for _, rule := range []string{m.UnencryptedSuffix, m.EncryptedSuffix, m.UnencryptedRegex, m.EncryptedRegex, m.UnencryptedCommentRegex, m.EncryptedCommentRegex} {
@@ -376,7 +438,12 @@ func recoverDataKey(metadata TreeBranch, groups [][]string, ids []age.Identity) 
 	if len(groups) > 1 {
 		threshold := len(groups)
 		if v, ok := field(metadata, "shamir_threshold"); ok {
-			if t, ok := v.(int); ok && t > 0 {
+			t, ok := v.(int)
+			if str, isStr := v.(string); isStr {
+				t, _ = strconv.Atoi(str)
+				ok = true
+			}
+			if ok && t > 0 {
 				threshold = t
 			}
 		}
