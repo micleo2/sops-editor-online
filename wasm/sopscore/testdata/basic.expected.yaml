@@ -1,0 +1,22 @@
+# Top comment
+database:
+    user: admin
+    # inline comment
+    password: hunter2
+    port: 5432
+    ratio: 0.75
+    enabled: true
+    nothing: null
+    empty: ""
+    host_unencrypted: db.example.com
+api_keys:
+    # first key
+    - abc123
+    - 42
+    - nested:
+        deep: value
+multiline: |
+    line one
+    line two
+unicode: héllo wörld ✓
+big: 1e+21

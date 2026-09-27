@@ -1,0 +1,5 @@
+a: 1
+secret: s1
+---
+b: two
+secret: s2

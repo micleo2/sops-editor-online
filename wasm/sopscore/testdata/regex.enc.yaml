@@ -1,0 +1,51 @@
+# Top comment
+database:
+    user: admin
+    # inline comment
+    password: ENC[AES256_GCM,data:4mICIxkw+w==,iv:SPlK9UvI5RvRB33ejlmXBN006KgE/+FLkyJdsp4d15c=,tag:XsFZ841cX/0eoIKMewas3A==,type:str]
+    port: 5432
+    ratio: 0.75
+    enabled: true
+    nothing: null
+    empty: ""
+    host_unencrypted: db.example.com
+api_keys:
+    # first key
+    - abc123
+    - 42
+    - nested:
+        deep: value
+multiline: |
+    line one
+    line two
+unicode: héllo wörld ✓
+big: 1e+21
+sops:
+    kms: []
+    gcp_kms: []
+    azure_kv: []
+    hc_vault: []
+    age:
+        - recipient: age17da2sgy3ws8h0gwftd2kqwdruuuh6xm5j3pjky7qmt7hwv7zzurqx4e0l0
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSA3S1VGa0N5clNlL1BTUGlO
+            TE9XbnVWZS8wMncydzlrbEs1UHc3OW9KN2hnCjFleVdnZjQ0M1pOMUs2cFFUWDNS
+            cHhuVDJTbmJKbm9HM0s2bVp0WWNhUFUKLS0tIGd2bmg5L2t4andXdkZHdW0xNG5L
+            ZlhrTUhEWEJ1Z3kyUjFIeWdqcDEvV3cKQZTgwJFYyvpib6AEMCoy4kVOW5gcF3O3
+            u2a/jf7+TZ58CIv8RQL0jibwHfGeb4GWAACCItuRJRAS6U724UbIYg==
+            -----END AGE ENCRYPTED FILE-----
+        - recipient: age1az48n6l0ndzkwzmhfmkxqn2dnf845304mj3xpel4f3zvntwfjses5etxtl
+          enc: |
+            -----BEGIN AGE ENCRYPTED FILE-----
+            YWdlLWVuY3J5cHRpb24ub3JnL3YxCi0+IFgyNTUxOSBwemZnTnlOVlRQZUppK2VU
+            akdmL2ZUVE04QkRzM05ZSlJ2OFAvWW9jNTJzCmptZ2NTVVRIZld0QUVGMlZCNGNB
+            MElhRVQxNC9TdFMvUGh6bjBDQXdNMTgKLS0tIEYveW5tUGV3QkdRdGtQVC9zN2dC
+            NkNhbG82SXlmOC9aWGZ1UWxMQUhNQUEKlD4RxE11Yw56BJxTqU2dikxDr9bSpr/q
+            jSrPuMSyVypCuIjFVtSrCi3EdTVIIHvlQSqy/WUhfRLddAGksIktJg==
+            -----END AGE ENCRYPTED FILE-----
+    lastmodified: "2026-09-27T20:15:28Z"
+    mac: ENC[AES256_GCM,data:niuhjCzBGafvcTp8rEWOIvz8Qvy2blyo1dzBYyKrGMrsfrbKCKMCo+9yeU55NHOIPS1Is0ocW6Xo7CaAhcFmm+jA0VPcKiAQfwVmvbXuHDjU/ScQgPCGVBOYvXdOVFdYODgcTOhngwrsoQKeSpZoUrUR1gApCuoE6/0jGrBqCyI=,iv:2RCnrf3777/j2L+lO9pODMra4ORGC7ppESCH8GAStbA=,tag:QfFlEKSx6BQVHe9u/ONEoQ==,type:str]
+    pgp: []
+    encrypted_regex: ^(password|secret)$
+    version: 3.9.4

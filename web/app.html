@@ -1,0 +1,797 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<!-- Nothing on this page may talk to the network: no fetches, images, fonts or frames. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'">
+<meta name="referrer" content="no-referrer">
+<meta name="color-scheme" content="light dark">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111418" media="(prefers-color-scheme: dark)">
+<title>SOPS Editor</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%232f6fed' stroke-width='2.2' stroke-linecap='round' stroke-linejoin='round'%3E%3Crect x='4' y='11' width='16' height='10' rx='2'/%3E%3Cpath d='M8 11V7a4 4 0 0 1 8 0v4'/%3E%3C/svg%3E">
+<style>
+:root {
+  --bg: #f6f7f9;
+  --surface: #ffffff;
+  --surface-2: #f1f3f6;
+  --border: #dde1e7;
+  --text: #1a1d23;
+  --muted: #5d6573;
+  --accent: #2f6fed;
+  --accent-text: #ffffff;
+  --accent-soft: #e8efff;
+  --danger: #c23a3a;
+  --danger-soft: #fdecec;
+  --ok: #1f8a4c;
+  --plain: #a86400;
+  --plain-soft: #fff4e0;
+  --radius: 12px;
+  --mono: ui-monospace, SFMono-Regular, "Roboto Mono", Menlo, Consolas, monospace;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111418;
+    --surface: #1a1e24;
+    --surface-2: #232830;
+    --border: #323842;
+    --text: #e7e9ee;
+    --muted: #9aa3b2;
+    --accent: #6d9bff;
+    --accent-text: #0d1117;
+    --accent-soft: #1f2a40;
+    --danger: #ff7b7b;
+    --danger-soft: #3a1f22;
+    --ok: #5fd08f;
+    --plain: #f0b55c;
+    --plain-soft: #3a2d17;
+  }
+}
+:root[data-theme="dark"] {
+  --bg: #111418;
+  --surface: #1a1e24;
+  --surface-2: #232830;
+  --border: #323842;
+  --text: #e7e9ee;
+  --muted: #9aa3b2;
+  --accent: #6d9bff;
+  --accent-text: #0d1117;
+  --accent-soft: #1f2a40;
+  --danger: #ff7b7b;
+  --danger-soft: #3a1f22;
+  --ok: #5fd08f;
+  --plain: #f0b55c;
+  --plain-soft: #3a2d17;
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--text);
+  font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+.wrap { max-width: 760px; margin: 0 auto; padding: 16px 16px 48px; }
+header { padding: 8px 2px 16px; }
+h1 { font-size: 1.5rem; margin: 0 0 4px; letter-spacing: -0.01em; display: flex; align-items: center; gap: 8px; }
+h1 svg { width: 26px; height: 26px; color: var(--accent); flex: none; }
+.sub { margin: 0; color: var(--muted); font-size: 0.95rem; }
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 16px;
+  margin-bottom: 16px;
+}
+h2 { font-size: 1.05rem; margin: 0 0 12px; display: flex; align-items: center; gap: 8px; }
+h2 .step {
+  display: inline-grid; place-items: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--accent-soft); color: var(--accent);
+  font-size: 0.8rem; font-weight: 700; flex: none;
+}
+.field + .field { margin-top: 18px; }
+label.caption { display: block; font-weight: 600; margin-bottom: 6px; font-size: 0.95rem; }
+.hint { color: var(--muted); font-size: 0.85rem; margin: 6px 0 0; }
+textarea, input[type="text"], select {
+  font: inherit;
+  color: var(--text);
+  background: var(--surface-2);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 10px;
+  width: 100%;
+  min-width: 0;
+}
+textarea { font-family: var(--mono); font-size: 0.85rem; resize: vertical; }
+textarea:focus, input:focus, select:focus, button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+.masked { -webkit-text-security: disc; }
+button, .button {
+  font: inherit;
+  font-weight: 600;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: var(--surface-2);
+  color: var(--text);
+  padding: 10px 16px;
+  cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  min-height: 44px;
+  white-space: nowrap;
+}
+button:disabled { opacity: 0.55; cursor: default; }
+button.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
+button.small { padding: 4px 10px; min-height: 34px; font-size: 0.9rem; }
+button svg { width: 18px; height: 18px; flex: none; }
+.row { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.grow { flex: 1; }
+.filepick { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+.filepick input[type="file"] { position: absolute; width: 1px; height: 1px; opacity: 0; }
+.filename { color: var(--muted); font-size: 0.9rem; word-break: break-all; }
+.filename.chosen { color: var(--text); font-family: var(--mono); }
+details summary { cursor: pointer; color: var(--muted); font-size: 0.9rem; padding: 8px 0 0; }
+details[open] summary { margin-bottom: 8px; }
+.check { display: inline-flex; align-items: center; gap: 8px; font-size: 0.9rem; color: var(--muted); cursor: pointer; }
+.check input { width: 18px; height: 18px; margin: 0; }
+.actions { margin-top: 18px; }
+.message { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 0.9rem; white-space: pre-wrap; word-break: break-word; }
+.message.error { background: var(--danger-soft); color: var(--danger); }
+.message.info { background: var(--surface-2); color: var(--muted); }
+.message:empty { display: none; }
+
+/* Editor */
+.edit-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; flex-wrap: wrap; margin-bottom: 12px; }
+.edit-head h2 { margin: 0; }
+.tabs { display: inline-flex; background: var(--surface-2); border: 1px solid var(--border); border-radius: 9px; padding: 3px; }
+.tabs button { border: 0; background: transparent; min-height: 34px; padding: 4px 14px; font-size: 0.9rem; color: var(--muted); }
+.tabs button[aria-selected="true"] { background: var(--surface); color: var(--text); box-shadow: 0 1px 2px rgb(0 0 0 / 0.12); }
+.meta { font-size: 0.85rem; color: var(--muted); margin: 0 0 12px; word-break: break-all; }
+.meta code { font-family: var(--mono); font-size: 0.8rem; }
+.legend { display: flex; gap: 14px; flex-wrap: wrap; font-size: 0.8rem; color: var(--muted); margin-bottom: 12px; }
+.legend span { display: inline-flex; align-items: center; gap: 4px; }
+.doc-title { font-size: 0.8rem; font-weight: 700; color: var(--muted); text-transform: uppercase; letter-spacing: 0.05em; margin: 16px 0 8px; }
+.doc-title:first-child { margin-top: 0; }
+.children { display: flex; flex-direction: column; gap: 8px; }
+.children .children { border-left: 2px solid var(--border); padding-left: 10px; margin-top: 8px; }
+.entry { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 8px; }
+.children .children .entry { background: var(--surface); }
+.entry-head { display: flex; gap: 6px; align-items: center; }
+.entry-head .key { flex: 1; font-family: var(--mono); font-size: 0.9rem; font-weight: 600; padding: 6px 8px; }
+.entry-head .index { flex: 1; color: var(--muted); font-size: 0.85rem; padding-left: 4px; }
+.entry-head select { width: auto; padding: 6px 4px; font-size: 0.85rem; flex: none; }
+.entry-body { margin-top: 6px; }
+.entry-body textarea.value { resize: none; overflow: hidden; font-size: 0.9rem; min-height: 38px; line-height: 1.4; }
+.entry-body input.value { font-family: var(--mono); font-size: 0.9rem; }
+.null { color: var(--muted); font-family: var(--mono); font-size: 0.85rem; padding: 2px 4px; }
+.icon-btn { min-height: 34px; min-width: 34px; padding: 0; border-radius: 8px; background: transparent; border: 1px solid transparent; color: var(--muted); }
+.icon-btn:hover { background: var(--surface-2); }
+.icon-btn svg { width: 18px; height: 18px; }
+.lock { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 6px; flex: none; }
+.lock svg { width: 16px; height: 16px; }
+.lock.enc { color: var(--ok); }
+.lock.plain { color: var(--plain); background: var(--plain-soft); }
+.entry.comment { display: flex; align-items: center; gap: 6px; background: transparent; border-style: dashed; padding: 4px 6px 4px 10px; }
+.entry.comment .hash { color: var(--muted); font-family: var(--mono); }
+.entry.comment input { flex: 1; background: transparent; border-color: transparent; font-family: var(--mono); font-size: 0.85rem; color: var(--muted); font-style: italic; padding: 4px; }
+.add-row { display: flex; gap: 8px; flex-wrap: wrap; }
+.add-row button { color: var(--accent); background: transparent; border-style: dashed; }
+.switch { display: inline-flex; align-items: center; gap: 10px; cursor: pointer; font-family: var(--mono); font-size: 0.9rem; }
+.switch input { width: 20px; height: 20px; margin: 0; accent-color: var(--accent); }
+.invalid { border-color: var(--danger) !important; }
+#yaml { min-height: 50vh; white-space: pre; overflow-wrap: normal; overflow-x: auto; }
+#output { min-height: 220px; white-space: pre; overflow-wrap: normal; overflow-x: auto; font-size: 0.78rem; }
+.status { font-size: 0.85rem; color: var(--muted); }
+.status.ok { color: var(--ok); }
+footer { color: var(--muted); font-size: 0.8rem; text-align: center; padding: 8px 16px; }
+footer p { margin: 4px 0; }
+.toast {
+  position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%);
+  background: var(--text); color: var(--bg); padding: 10px 16px; border-radius: 999px;
+  font-size: 0.9rem; opacity: 0; transition: opacity 0.2s; pointer-events: none;
+}
+.toast.show { opacity: 1; }
+.loading { display: inline-block; width: 16px; height: 16px; border: 2px solid currentColor; border-right-color: transparent; border-radius: 50%; animation: spin 0.8s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+[hidden] { display: none !important; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>SOPS Editor</h1>
+    <p class="sub">Edit age-encrypted SOPS YAML files. Everything runs inside this page, and nothing is sent anywhere.</p>
+  </header>
+
+  <section class="card" id="open-card">
+    <h2><span class="step">1</span>Open</h2>
+    <div class="field">
+      <label class="caption">Encrypted file</label>
+      <div class="filepick">
+        <label class="button" for="file">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/></svg>
+          Choose file
+        </label>
+        <input type="file" id="file">
+        <span class="filename" id="filename">No file chosen</span>
+      </div>
+      <details id="paste-details">
+        <summary>Or paste the file contents</summary>
+        <textarea id="pasted" rows="6" spellcheck="false" autocapitalize="off" autocomplete="off" placeholder="key: ENC[AES256_GCM,…]&#10;sops:&#10;    age: …"></textarea>
+      </details>
+    </div>
+    <div class="field">
+      <label class="caption" for="keys">Age key</label>
+      <textarea id="keys" class="masked" rows="4" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" placeholder="Paste the contents of your age keys.txt&#10;AGE-SECRET-KEY-1…"></textarea>
+      <div class="row" style="justify-content: space-between; margin-top: 6px;">
+        <label class="check"><input type="checkbox" id="show-keys">Show key</label>
+        <label class="check"><input type="checkbox" id="ignore-mac">Ignore MAC mismatch</label>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="primary" id="decrypt" disabled><span class="loading" aria-hidden="true"></span>Loading SOPS…</button>
+    </div>
+    <p class="message error" id="open-error" role="alert"></p>
+  </section>
+
+  <section class="card" id="edit-card" hidden>
+    <div class="edit-head">
+      <h2><span class="step">2</span>Edit</h2>
+      <div class="tabs" role="tablist">
+        <button role="tab" id="tab-fields" aria-selected="true">Fields</button>
+        <button role="tab" id="tab-yaml" aria-selected="false">YAML</button>
+      </div>
+    </div>
+    <p class="meta" id="meta"></p>
+    <div id="fields-pane">
+      <div class="legend">
+        <span><span class="lock enc" data-icon="lock"></span>encrypted</span>
+        <span><span class="lock plain" data-icon="unlock"></span>stored as plain text</span>
+      </div>
+      <div id="fields"></div>
+    </div>
+    <div id="yaml-pane" hidden>
+      <textarea id="yaml" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off"></textarea>
+      <p class="hint">This is the decrypted file, as <code>sops edit</code> would show it.</p>
+    </div>
+    <p class="message error" id="edit-error" role="alert"></p>
+  </section>
+
+  <section class="card" id="out-card" hidden>
+    <h2><span class="step">3</span>Save</h2>
+    <div class="row">
+      <button class="primary grow" id="download">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m7 10 5 5 5-5"/><path d="M5 21h14"/></svg>
+        Download
+      </button>
+      <button class="grow" id="copy">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>
+        Copy
+      </button>
+    </div>
+    <p class="status" id="out-status"></p>
+    <textarea id="output" readonly spellcheck="false" aria-label="Encrypted output"></textarea>
+    <div class="row" style="margin-top: 12px;">
+      <button class="small" id="close">Close file</button>
+    </div>
+  </section>
+
+  <footer>
+    <p>The SOPS format code (tree walking, AES-GCM values, MAC, YAML store) is compiled from the SOPS Go sources and <code>filippo.io/age</code> to WebAssembly, and is embedded in this file.</p>
+    <p>This page's security policy blocks all network access.</p>
+  </footer>
+</div>
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+/*WASM_EXEC_JS*/
+</script>
+<script>
+"use strict";
+const WASM_GZ_BASE64 = "__WASM_GZ_BASE64__";
+
+const ICONS = {
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg>',
+  unlock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 7.5-2"/></svg>',
+  trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16"/><path d="M10 11v6M14 11v6"/><path d="M6 7l1 13a1 1 0 0 0 1 1h8a1 1 0 0 0 1-1l1-13"/><path d="M9 7V4h6v3"/></svg>',
+  plus: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>',
+};
+const TYPES = [
+  ["str", "text"], ["int", "integer"], ["float", "number"], ["bool", "true/false"],
+  ["null", "null"], ["map", "group"], ["seq", "list"],
+];
+
+const $ = (id) => document.getElementById(id);
+const state = {
+  docs: null,        // editor model: array of map nodes (one per YAML document)
+  fileName: "",
+  fileText: "",
+  output: "",
+  tab: "fields",
+  yamlDirty: false,
+};
+let core = null;
+
+// ---------- SOPS core (WebAssembly) ----------
+
+async function loadCore() {
+  const bin = Uint8Array.from(atob(WASM_GZ_BASE64), (c) => c.charCodeAt(0));
+  const stream = new Blob([bin]).stream().pipeThrough(new DecompressionStream("gzip"));
+  const wasm = await new Response(stream).arrayBuffer();
+  const go = new Go();
+  const ready = new Promise((resolve) => { window.onSopsCoreReady = resolve; });
+  const { instance } = await WebAssembly.instantiate(wasm, go.importObject);
+  go.run(instance);
+  await ready;
+  core = window.sopsCore;
+}
+
+function call(fn, ...args) {
+  const res = JSON.parse(core[fn](...args));
+  if (!res.ok) throw new Error(res.error);
+  return res;
+}
+
+// ---------- helpers ----------
+
+function el(tag, props = {}, ...children) {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(props)) {
+    if (k === "class") e.className = v;
+    else if (k === "html") e.innerHTML = v;
+    else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v === true) e.setAttribute(k, "");
+    else if (v !== false && v != null) e.setAttribute(k, v);
+  }
+  for (const c of children) if (c != null) e.append(c);
+  return e;
+}
+
+function debounce(fn, ms) {
+  let t = null;
+  const run = () => { t = null; fn(); };
+  const wrapped = () => { clearTimeout(t); t = setTimeout(run, ms); };
+  // Runs a pending call right away; does nothing if none is pending.
+  wrapped.flush = () => { if (t !== null) { clearTimeout(t); run(); } };
+  wrapped.now = () => { clearTimeout(t); run(); };
+  wrapped.cancel = () => { clearTimeout(t); t = null; };
+  return wrapped;
+}
+
+let toastTimer;
+function toast(msg) {
+  const t = $("toast");
+  t.textContent = msg;
+  t.classList.add("show");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove("show"), 1800);
+}
+
+function autosize(ta) {
+  ta.style.height = "auto";
+  ta.style.height = ta.scrollHeight + 2 + "px";
+}
+
+for (const span of document.querySelectorAll("[data-icon]")) span.innerHTML = ICONS[span.dataset.icon];
+
+// ---------- step 1: open ----------
+
+$("file").addEventListener("change", async () => {
+  const f = $("file").files[0];
+  if (!f) return;
+  state.fileName = f.name;
+  state.fileText = await f.text();
+  $("filename").textContent = f.name;
+  $("filename").classList.add("chosen");
+  $("pasted").value = "";
+  $("open-error").textContent = "";
+});
+
+$("pasted").addEventListener("input", () => {
+  if ($("pasted").value.trim()) {
+    state.fileName = "";
+    state.fileText = "";
+    $("file").value = "";
+    $("filename").textContent = "Using pasted contents";
+    $("filename").classList.remove("chosen");
+  }
+});
+
+$("show-keys").addEventListener("change", () => {
+  $("keys").classList.toggle("masked", !$("show-keys").checked);
+});
+
+$("decrypt").addEventListener("click", () => {
+  $("open-error").textContent = "";
+  const text = $("pasted").value.trim() ? $("pasted").value : state.fileText;
+  if (!text) { $("open-error").textContent = "Choose an encrypted file first."; return; }
+  if (!$("keys").value.trim()) { $("open-error").textContent = "Paste your age key first."; return; }
+  let res;
+  try {
+    res = call("open", text, $("keys").value, $("ignore-mac").checked);
+  } catch (e) {
+    $("open-error").textContent = e.message;
+    return;
+  }
+  state.docs = res.docs;
+  showMeta(res.recipients);
+  $("edit-card").hidden = false;
+  $("out-card").hidden = false;
+  setTab("fields");
+  renderFields();
+  regenerate.now();
+  $("edit-card").scrollIntoView({ behavior: "smooth", block: "start" });
+});
+
+function showMeta(recipients) {
+  const meta = $("meta");
+  meta.textContent = "";
+  const name = state.fileName || "pasted file";
+  meta.append(el("strong", {}, name), ` · ${recipients.length} age recipient${recipients.length === 1 ? "" : "s"}`);
+  const mine = recipients.filter((r) => r.mine);
+  if (mine.length) {
+    meta.append(el("br"), "Your key: ", el("code", {}, mine[0].publicKey));
+  }
+}
+
+// ---------- step 2: fields editor ----------
+
+function newScalar(t, v = "") { return { t, v }; }
+
+function convert(node, t) {
+  if (node.t === t) return node;
+  const scalar = !["map", "seq"].includes(node.t);
+  const hasChildren = !scalar && node.items && node.items.some((i) => !("c" in i));
+  if (hasChildren && !confirm("Changing the type will remove the nested entries. Continue?")) return null;
+  if (t === "map" || t === "seq") return { t, v: "", items: [] };
+  if (t === "null") return { t, v: "" };
+  if (t === "bool") return { t, v: /^(true|yes|1|on)$/i.test(scalar ? node.v.trim() : "") ? "true" : "false" };
+  return { t, v: scalar && node.t !== "null" ? node.v : "" };
+}
+
+// Lock icons by model object (value node or comment item), so they can be
+// refreshed in place when the encryption rules' outcome changes.
+let badges = new Map();
+
+function setBadge(badge, enc) {
+  badge.className = "lock " + (enc ? "enc" : "plain");
+  badge.title = enc ? "Encrypted" : "Stored as plain text";
+  badge.setAttribute("aria-label", badge.title);
+  badge.innerHTML = enc ? ICONS.lock : ICONS.unlock;
+}
+
+function lockBadge(obj) {
+  if (obj.enc === undefined || obj.enc === null) return null;
+  const badge = el("span", {});
+  setBadge(badge, obj.enc);
+  badges.set(obj, badge);
+  return badge;
+}
+
+function updateBadges() {
+  for (const [obj, badge] of badges) setBadge(badge, obj.enc);
+}
+
+function typeSelect(node, onChange) {
+  const sel = el("select", { "aria-label": "Type" });
+  for (const [t, label] of TYPES) {
+    const o = el("option", { value: t }, label);
+    if (t === node.t) o.selected = true;
+    sel.append(o);
+  }
+  sel.addEventListener("change", () => {
+    const next = convert(node, sel.value);
+    if (!next) { sel.value = node.t; return; }
+    onChange(next);
+  });
+  return sel;
+}
+
+function deleteButton(label, onClick) {
+  return el("button", { class: "icon-btn", type: "button", title: label, "aria-label": label, html: ICONS.trash, onclick: onClick });
+}
+
+function valueEditor(node) {
+  switch (node.t) {
+    case "str": {
+      const ta = el("textarea", { class: "value", rows: "1", spellcheck: "false", autocapitalize: "off", autocomplete: "off", "aria-label": "Value" });
+      ta.value = node.v;
+      ta.addEventListener("input", () => { node.v = ta.value; autosize(ta); changed(); });
+      requestAnimationFrame(() => autosize(ta));
+      return ta;
+    }
+    case "int":
+    case "float": {
+      const inp = el("input", { type: "text", class: "value", inputmode: node.t === "int" ? "numeric" : "decimal", autocomplete: "off", "aria-label": "Value" });
+      inp.value = node.v;
+      const check = () => {
+        const s = inp.value.trim();
+        const ok = node.t === "int" ? /^[-+]?\d+$/.test(s) : s !== "" && !isNaN(Number(s.replace(/^[-+]?(inf|infinity)$/i, "1").replace(/^nan$/i, "1")));
+        inp.classList.toggle("invalid", !ok);
+      };
+      inp.addEventListener("input", () => { node.v = inp.value; check(); changed(); });
+      check();
+      return inp;
+    }
+    case "bool": {
+      const cb = el("input", { type: "checkbox" });
+      cb.checked = node.v === "true";
+      const txt = el("span", {}, node.v);
+      cb.addEventListener("change", () => { node.v = cb.checked ? "true" : "false"; txt.textContent = node.v; changed(); });
+      return el("label", { class: "switch" }, cb, txt);
+    }
+    case "null":
+      return el("span", { class: "null" }, "null");
+  }
+  return null;
+}
+
+// Renders the items of a map or sequence node.
+function renderChildren(node) {
+  const box = el("div", { class: "children" });
+  node.items.forEach((item, i) => box.append(renderItem(node, item, i)));
+  const add = el("div", { class: "add-row" });
+  if (node.t === "map") {
+    add.append(el("button", { class: "small", type: "button", html: ICONS.plus + "Field", onclick: () => {
+      focusItem = { k: uniqueKey(node), v: newScalar("str") };
+      node.items.push(focusItem);
+      structureChanged();
+    } }));
+  } else {
+    add.append(el("button", { class: "small", type: "button", html: ICONS.plus + "Item", onclick: () => {
+      focusItem = { v: newScalar("str") };
+      node.items.push(focusItem);
+      structureChanged();
+    } }));
+  }
+  box.append(add);
+  return box;
+}
+
+function uniqueKey(node) {
+  const keys = new Set(node.items.filter((i) => "k" in i).map((i) => i.k));
+  let k = "new_key", n = 2;
+  while (keys.has(k)) k = `new_key_${n++}`;
+  return k;
+}
+
+function renderItem(parent, item, index) {
+  const remove = () => { parent.items.splice(parent.items.indexOf(item), 1); structureChanged(); };
+
+  if ("c" in item) {
+    const inp = el("input", { type: "text", "aria-label": "Comment", spellcheck: "false" });
+    inp.value = item.c;
+    inp.addEventListener("input", () => { item.c = inp.value; changed(); });
+    inp.addEventListener("change", () => { refreshFlags(); updateBadges(); });
+    const row = el("div", { class: "entry comment" }, el("span", { class: "hash" }, "#"), inp, lockBadge(item), deleteButton("Delete comment", remove));
+    return row;
+  }
+
+  const node = item.v;
+  const head = el("div", { class: "entry-head" });
+  if (parent.t === "map") {
+    const key = el("input", { type: "text", class: "key", spellcheck: "false", autocapitalize: "off", autocomplete: "off", "aria-label": "Key" });
+    key.value = item.k;
+    const check = () => {
+      const dup = parent.items.some((o) => o !== item && "k" in o && o.k === key.value);
+      key.classList.toggle("invalid", key.value === "" || dup || (state.docs.includes(parent) && key.value === "sops"));
+    };
+    key.addEventListener("input", () => { item.k = key.value; check(); changed(); });
+    // Encryption rules depend on keys, so refresh the lock icons once editing a key is done.
+    key.addEventListener("change", () => { refreshFlags(); updateBadges(); });
+    check();
+    head.append(key);
+  } else {
+    head.append(el("span", { class: "index" }, `item ${parent.items.filter((o) => !("c" in o)).indexOf(item) + 1}`));
+  }
+  head.append(typeSelect(node, (next) => { item.v = next; structureChanged(); }));
+  const badge = lockBadge(node);
+  if (badge) head.append(badge);
+  head.append(deleteButton(parent.t === "map" ? "Delete field" : "Delete item", remove));
+
+  const entry = el("div", { class: "entry" }, head);
+  if (node.t === "map" || node.t === "seq") {
+    entry.append(renderChildren(node));
+  } else if (node.t !== "null") {
+    entry.append(el("div", { class: "entry-body" }, valueEditor(node)));
+  }
+  if (item === focusItem) focusEl = head.querySelector(".key") || entry.querySelector(".value");
+  return entry;
+}
+
+// A newly added item whose first input should get focus after rendering.
+let focusItem = null;
+let focusEl = null;
+
+function renderFields() {
+  const root = $("fields");
+  const y = window.scrollY;
+  focusEl = null;
+  badges = new Map();
+  root.textContent = "";
+  state.docs.forEach((doc, i) => {
+    if (state.docs.length > 1) root.append(el("div", { class: "doc-title" }, `Document ${i + 1}`));
+    root.append(renderChildren(doc));
+  });
+  window.scrollTo(0, y);
+  if (focusEl) {
+    focusEl.focus({ preventScroll: true });
+    if (focusEl.select) focusEl.select();
+    focusEl.scrollIntoView({ block: "center", behavior: "smooth" });
+  }
+  focusItem = null;
+}
+
+// Copies freshly computed encryption flags into the current model.
+function applyFlags(dst, src) {
+  if (!dst || !src) return;
+  if ("enc" in src) dst.enc = src.enc; else delete dst.enc;
+  if (dst.items && src.items) {
+    dst.items.forEach((item, i) => {
+      const s = src.items[i];
+      if (!s) return;
+      if ("c" in item) { if ("enc" in s) item.enc = s.enc; else delete item.enc; }
+      else applyFlags(item.v, s.v);
+    });
+  }
+}
+
+function refreshFlags() {
+  try {
+    const res = call("annotate", JSON.stringify(state.docs));
+    state.docs.forEach((d, i) => applyFlags(d, res.docs[i]));
+  } catch (e) { /* flags stay as they were */ }
+}
+
+function structureChanged() {
+  refreshFlags();
+  renderFields();
+  changed();
+}
+
+// ---------- YAML tab ----------
+
+function setTab(tab) {
+  if (tab === state.tab && !$("yaml-pane").hidden === (tab === "yaml")) return;
+  $("edit-error").textContent = "";
+  if (tab === "yaml") {
+    try {
+      $("yaml").value = call("toYAML", JSON.stringify(state.docs)).yaml;
+    } catch (e) {
+      $("edit-error").textContent = e.message;
+      return;
+    }
+    state.yamlDirty = false;
+  } else if (state.tab === "yaml" && state.yamlDirty) {
+    yamlChanged.cancel();
+    try {
+      state.docs = call("fromYAML", $("yaml").value).docs;
+    } catch (e) {
+      $("edit-error").textContent = "Fix the YAML before switching back: " + e.message;
+      return;
+    }
+    renderFields();
+    regenerate();
+  }
+  state.tab = tab;
+  $("tab-fields").setAttribute("aria-selected", tab === "fields");
+  $("tab-yaml").setAttribute("aria-selected", tab === "yaml");
+  $("fields-pane").hidden = tab !== "fields";
+  $("yaml-pane").hidden = tab !== "yaml";
+}
+$("tab-fields").addEventListener("click", () => setTab("fields"));
+$("tab-yaml").addEventListener("click", () => setTab("yaml"));
+
+const yamlChanged = debounce(() => {
+  try {
+    state.docs = call("fromYAML", $("yaml").value).docs;
+    $("edit-error").textContent = "";
+    regenerate();
+  } catch (e) {
+    $("edit-error").textContent = e.message;
+    regenerate.cancel();
+    setOutput(null, "Fix the YAML above to update the output.");
+  }
+}, 300);
+$("yaml").addEventListener("input", () => { state.yamlDirty = true; yamlChanged(); });
+
+// ---------- step 3: output ----------
+
+function changed() {
+  regenerate();
+}
+
+const regenerate = debounce(() => {
+  try {
+    const res = call("encrypt", JSON.stringify(state.docs));
+    setOutput(res.output);
+    $("edit-error").textContent = "";
+  } catch (e) {
+    $("edit-error").textContent = e.message;
+    setOutput(null, "Fix the problem above to update the output.");
+  }
+}, 250);
+
+function setOutput(text, problem) {
+  if (text == null) {
+    state.output = "";
+    $("output").value = "";
+    $("out-status").textContent = problem;
+    $("out-status").classList.remove("ok");
+    $("download").disabled = true;
+    $("copy").disabled = true;
+    return;
+  }
+  state.output = text;
+  $("output").value = text;
+  $("out-status").textContent = "Up to date: re-encrypted with the file's existing data key and recipients.";
+  $("out-status").classList.add("ok");
+  $("download").disabled = false;
+  $("copy").disabled = false;
+}
+
+function ensureFresh() {
+  yamlChanged.flush();
+  regenerate.flush();
+  return state.output;
+}
+
+$("download").addEventListener("click", () => {
+  const text = ensureFresh();
+  if (!text) return;
+  const blob = new Blob([text], { type: "application/x-yaml" });
+  const url = URL.createObjectURL(blob);
+  const a = el("a", { href: url, download: state.fileName || "secrets.enc.yaml" });
+  document.body.append(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 10000);
+});
+
+$("copy").addEventListener("click", async () => {
+  const text = ensureFresh();
+  if (!text) return;
+  try {
+    await navigator.clipboard.writeText(text);
+  } catch (e) {
+    const ta = $("output");
+    ta.focus();
+    ta.select();
+    ta.setSelectionRange(0, text.length);
+    if (!document.execCommand("copy")) { toast("Copy failed. Select the text and copy it manually."); return; }
+    ta.setSelectionRange(0, 0);
+    ta.blur();
+  }
+  toast("Copied to clipboard");
+});
+
+$("close").addEventListener("click", () => {
+  yamlChanged.cancel();
+  regenerate.cancel();
+  call("close");
+  state.docs = null;
+  state.output = "";
+  $("fields").textContent = "";
+  $("yaml").value = "";
+  $("output").value = "";
+  $("edit-card").hidden = true;
+  $("out-card").hidden = true;
+  window.scrollTo({ top: 0, behavior: "smooth" });
+});
+
+// ---------- boot ----------
+
+loadCore().then(() => {
+  const b = $("decrypt");
+  b.disabled = false;
+  b.textContent = "Decrypt";
+}).catch((e) => {
+  $("decrypt").textContent = "Unavailable";
+  $("open-error").textContent = "Could not start the SOPS engine in this browser: " + e.message;
+});
+</script>
+</body>
+</html>
